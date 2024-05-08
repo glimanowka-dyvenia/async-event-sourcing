@@ -1,25 +1,11 @@
 from abc import ABC
 from collections import deque
-from functools import reduce, singledispatchmethod
+from functools import singledispatchmethod
 from uuid import UUID, uuid4
+
 import attr
 
-
-class NotEnoughMoney(Exception):
-    """Exception raised when funds on account are not sufficient"""
-
-    pass
-
-
-class UnknownEvent(Exception):
-    """Raised when an Event kind is not known"""
-
-    pass
-
-
-@attr.s(frozen=True, kw_only=True)
-class Event:
-    producer_id: UUID = attr.ib()
+from errors import DepositTooHigh, NotEnoughMoney, UnknownEvent
 
 
 @attr.s(frozen=True, kw_only=True)
@@ -31,6 +17,16 @@ class Money:
         amount = self.amount - other.amount
         return Money(amount=amount, currency=self.currency)
 
+    def __add__(self, other):
+        amount = self.amount + other.amount
+        return Money(amount=amount, currency=self.currency)
+
+
+# Events:
+@attr.s(frozen=True, kw_only=True)
+class Event:
+    producer_id: UUID = attr.ib()
+
 
 @attr.s(frozen=True, kw_only=True)
 class AccountCreated(Event):
@@ -41,6 +37,14 @@ class AccountCreated(Event):
 class MoneyWithdrawn(Event):
     amount: Money = attr.ib()
 
+
+@attr.s(frozen=True, kw_only=True)
+class MoneyDeposited(Event):
+    amount: Money = attr.ib()
+
+
+# @attr.s()
+# /Events
 
 class Entity(ABC):
     def __init__(self) -> None:
@@ -61,7 +65,6 @@ class Entity(ABC):
 
         self._apply(event)
         self._changes.append(event)
-        # self._id = acc_created.producer_id
 
     def _apply(self, event: Event) -> None:
         """Apply new event to current state"""
@@ -87,9 +90,9 @@ class Account(Entity):
     def _(self, event: MoneyWithdrawn):
         self._balance -= event.amount
 
-    # def _balance(self) -> Money:
-    #     # TODO: Implement it
-    #     pass
+    @_apply.register
+    def _(self, event: MoneyDeposited):
+        self._balance += event.amount
 
     def withdraw(self, amount: Money):
         if self._balance >= amount:
@@ -97,61 +100,60 @@ class Account(Entity):
         else:
             raise NotEnoughMoney()
 
-        # update = AccountUpdatedWithdrawal(producer_id=uuid4(), withdrawal=money)
-        # self._changes.append(update)
-
-
-class Repository:
-    ...
-
-    def get(self, entity_id):
-        root = self._entity_class.construct()
-        changes = self._event_store.all_events_for(entity_id)
-
-        final_form = reduce(self._apply_event, changes, root)
-
-        return final_form
-
-    def save(self, account):
-        self._event_store.store(account.id, account.uncommited_changes)
+    def deposit(self, amount: Money):
+        if amount.amount < 1000:
+            self._take(MoneyDeposited(producer_id=self._id, amount=amount))
+        else:
+            raise DepositTooHigh()
 
 
 def main():
-    print("Hi")
-    # event = Event(producer_id=uuid4())
-    # print(vars(event))
-    # print(event.producer_id)
-
-    # entity = Entity()
-    # print(entity)
-
-    # acc_created = AccountCreated(
-    #     producer_id=uuid4(), deposit=Money(amount=1000, currency="PLN")
-    # )
-    # print(acc_created)
 
     account = Account(Money(amount=1000, currency="PLN"))
-    print(vars(account))
-    print("\n")
+    print(vars(account), "\n")
 
     account.withdraw(Money(amount=200, currency="PLN"))
-    print(vars(account))
-    print("\n")
+    print(vars(account), "\n")
 
     account.withdraw(Money(amount=700, currency="PLN"))
     print(vars(account))
-    print("\n")
+    print(account._balance, "\n")
 
+    try:
+        account.withdraw(Money(amount=1000, currency="PLN"))
+        print(vars(account))
+        print(account._balance)
+    except Exception as e:
+        print(e.__class__)
+        print(e.__repr__, "\n")
+
+    account.deposit(Money(amount=300, currency="PLN"))
+    print(vars(account))
     print(account._balance)
-
-    # repo = Repository()
-    # repo.get(entity_id="asdf")
-
-    # repo = AccountRepository()
-    # repo.save(account)
-
-    # assert repo.get(account.id) == account
 
 
 if __name__ == "__main__":
     main()
+
+
+# class Repository:
+#     ...
+
+#     def get(self, entity_id):
+#         root = self._entity_class.construct()
+#         changes = self._event_store.all_events_for(entity_id)
+
+#         final_form = reduce(self._apply_event, changes, root)
+
+#         return final_form
+
+#     def save(self, account):
+#         self._event_store.store(account.id, account.uncommited_changes)
+
+# repo = Repository()
+# repo.get(entity_id="asdf")
+
+# repo = AccountRepository()
+# repo.save(account)
+
+# assert repo.get(account.id) == account
